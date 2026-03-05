@@ -29,9 +29,16 @@
 #include "FogRendering.h"
 #include "SceneRendering.h"
 #include "SceneTextureParameters.h"
+#include "RayTracing/RayTracing.h"
 #include "RayTracing/RayTracingLighting.h"
+#include "RayTracing/RayTracingScene.h"
+#include "RayTracingShaderBindingLayout.h"
+#include "RendererUtils.h"
 #include "DeferredShadingRenderer.h"
 #include "ScenePrivate.h"
+#include "SceneProxies/SkyLightSceneProxy.h"
+#include "SceneRendererInterface.h"
+#include "SceneUniformBuffer.h"
 
 #include <cmath>
 
@@ -189,8 +196,14 @@ class FRayTracingRTXGIProbeUpdateRGS : public FGlobalShader
 		return ERayTracingPayloadType::RayTracingMaterial;
 	}
 
+	static const FShaderBindingLayout* GetShaderBindingLayout(const FShaderPermutationParameters& Parameters)
+	{
+		return RayTracing::GetShaderBindingLayout(Parameters.Platform);
+	}
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_SRV(RaytracingAccelerationStructure, TLAS)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(RaytracingAccelerationStructure, FarFieldTLAS)
 
 		SHADER_PARAMETER(uint32, FrameRandomSeed)
 
@@ -216,7 +229,7 @@ class FRayTracingRTXGIProbeUpdateRGS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<uint>, DDGIProbeScrollSpace)
 
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, ViewUniformBuffer)
-		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FRaytracingLightDataPacked, LightDataPacked)
+		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FRayTracingLightGrid, LightDataPacked)
 	END_SHADER_PARAMETER_STRUCT()
 };
 
@@ -258,8 +271,14 @@ class FRayTracingRTXGIProbeViewRGS : public FGlobalShader
 		return ERayTracingPayloadType::RayTracingMaterial;
 	}
 
+	static const FShaderBindingLayout* GetShaderBindingLayout(const FShaderPermutationParameters& Parameters)
+	{
+		return RayTracing::GetShaderBindingLayout(Parameters.Platform);
+	}
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_SRV(RaytracingAccelerationStructure, TLAS)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(RaytracingAccelerationStructure, FarFieldTLAS)
 
 		SHADER_PARAMETER(uint32, FrameRandomSeed)
 
@@ -277,7 +296,7 @@ class FRayTracingRTXGIProbeViewRGS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, RadianceOutput)
 
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, ViewUniformBuffer)
-		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FRaytracingLightDataPacked, LightDataPacked)
+		SHADER_PARAMETER_RDG_UNIFORM_BUFFER(FRayTracingLightGrid, LightDataPacked)
 	END_SHADER_PARAMETER_STRUCT()
 };
 
@@ -759,7 +778,7 @@ namespace DDGIVolumeUpdate
 #else
 	bool ShouldDynamicUpdate(const FScene& Scene)
 	{
-		return ShouldRenderRayTracingEffect(true) && Scene.RayTracingScene.GetRHIRayTracingScene() != nullptr;
+		return ShouldRenderRayTracingEffect(true) && Scene.RayTracingScene.GetRHIRayTracingScene(ERayTracingSceneLayer::Base) != nullptr;
 	}
 #endif
 
@@ -822,7 +841,7 @@ namespace DDGIVolumeUpdate
 #if ENGINE_MAJOR_VERSION < 5
 		if (DDGIProbesTextureVis == 0 || View.RayTracingScene.RayTracingSceneRHI == nullptr) return;
 #else
-		if (DDGIProbesTextureVis == 0 || Scene.RayTracingScene.GetRHIRayTracingScene() == nullptr) return;
+		if (DDGIProbesTextureVis == 0 || Scene.RayTracingScene.GetRHIRayTracingScene(ERayTracingSceneLayer::Base) == nullptr) return;
 #endif
 
 		static const int c_probeVisWidth = 800;
@@ -859,6 +878,7 @@ namespace DDGIVolumeUpdate
 		PassParameters->CameraMatrix = static_cast<FMatrix44f>(View.ViewMatrices.GetViewMatrix().Inverse());
 
 		PassParameters->TLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::Base);
+		PassParameters->FarFieldTLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::FarField);
 		PassParameters->RadianceOutput = ProbeVisUAV;
 		PassParameters->FrameRandomSeed = GFrameNumber;
 
@@ -877,7 +897,10 @@ namespace DDGIVolumeUpdate
 		}
 
 		PassParameters->ViewUniformBuffer = View.ViewUniformBuffer;
-		PassParameters->LightDataPacked = View.RayTracingLightDataUniformBuffer;
+		PassParameters->LightDataPacked = View.RayTracingLightGridUniformBuffer;
+
+		TRDGUniformBufferRef<FSceneUniformParameters> SceneUniformBufferRef = GetSceneUniformBufferRef(GraphBuilder, View);
+		TRDGUniformBufferRef<FNaniteRayTracingUniformParameters> NaniteRayTracingUniformBufferRef = Nanite::GetPublicGlobalRayTracingUniformBuffer();
 
 		FIntPoint DispatchSize(c_probeVisWidth, c_probeVisHeight);
 
@@ -887,15 +910,22 @@ namespace DDGIVolumeUpdate
 			ERDGPassFlags::Compute,
 #if ENGINE_MAJOR_VERSION < 5
 			[PassParameters, RayTracingSceneRHI = View.RayTracingScene.RayTracingSceneRHI, &View, RayGenerationShader, DispatchSize](FRHICommandList& RHICmdList)
-#else
-			[PassParameters, RayTracingSceneRHI = Scene.RayTracingScene.GetRHIRayTracingSceneChecked(), &View, RayGenerationShader, DispatchSize](FRHIRayTracingCommandList& RHICmdList)
-#endif
 			{
 				FRayTracingShaderBindingsWriter GlobalResources;
 				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
-
 				RHICmdList.RayTraceDispatch(View.RayTracingMaterialPipeline, RayGenerationShader.GetRayTracingShader(), RayTracingSceneRHI, GlobalResources, DispatchSize.X, DispatchSize.Y);
 			}
+#else
+			[&View, RayGenerationShader, PassParameters, DispatchSize, SceneUniformBufferRef, NaniteRayTracingUniformBufferRef](FRDGAsyncTask, FRHICommandList& RHICmdList)
+			{
+				FRHIBatchedShaderParameters& GlobalResources = RHICmdList.GetScratchShaderParameters();
+				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
+				FRHIUniformBuffer* SceneUB = SceneUniformBufferRef ? SceneUniformBufferRef->GetRHI() : nullptr;
+				FRHIUniformBuffer* NaniteUB = NaniteRayTracingUniformBufferRef ? NaniteRayTracingUniformBufferRef->GetRHI() : nullptr;
+				TOptional<FScopedUniformBufferStaticBindings> StaticUniformBufferScope = RayTracing::BindStaticUniformBufferBindings(View, SceneUB, NaniteUB, RHICmdList);
+				RHICmdList.RayTraceDispatch(View.MaterialRayTracingData.PipelineState, RayGenerationShader.GetRayTracingShader(), View.MaterialRayTracingData.ShaderBindingTable, GlobalResources, DispatchSize.X, DispatchSize.Y);
+			}
+#endif
 		);
 	}
 #endif //!(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -942,6 +972,7 @@ namespace DDGIVolumeUpdate
 		*PassParameters = DefaultPassParameters;
 
 		PassParameters->TLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::Base);
+		PassParameters->FarFieldTLAS = Scene.RayTracingScene.GetLayerView(ERayTracingSceneLayer::FarField);
 		PassParameters->RadianceOutput = ProbesRadianceUAV;
 		PassParameters->FrameRandomSeed = GFrameNumber;
 		
@@ -1014,7 +1045,10 @@ namespace DDGIVolumeUpdate
 		PassParameters->DebugOutput = GraphBuilder.CreateUAV(GraphBuilder.CreateTexture(DDGIDebugOutputDesc, TEXT("DDGIVolumeUpdateDebug")));
 
 		PassParameters->ViewUniformBuffer = View.ViewUniformBuffer;
-		PassParameters->LightDataPacked = View.RayTracingLightDataUniformBuffer;
+		PassParameters->LightDataPacked = View.RayTracingLightGridUniformBuffer;
+
+		TRDGUniformBufferRef<FSceneUniformParameters> SceneUniformBufferRef = GetSceneUniformBufferRef(GraphBuilder, View);
+		TRDGUniformBufferRef<FNaniteRayTracingUniformParameters> NaniteRayTracingUniformBufferRef = Nanite::GetPublicGlobalRayTracingUniformBuffer();
 
 		FIntPoint DispatchSize = ProbesRadianceTex->Desc.Extent;
 
@@ -1025,22 +1059,28 @@ namespace DDGIVolumeUpdate
 #if ENGINE_MAJOR_VERSION < 5
 			[PassParameters, RayTracingSceneRHI = View.RayTracingScene.RayTracingSceneRHI, &View, RayGenerationShader, DispatchSize, ProbesRadianceTex]
 			(FRHICommandList& RHICmdList)
-#else
-			[PassParameters, RayTracingSceneRHI = Scene.RayTracingScene.GetRHIRayTracingSceneChecked(), &View, RayGenerationShader, DispatchSize, ProbesRadianceTex]
-			(FRHIRayTracingCommandList& RHICmdList)
-#endif
 			{
 				FRayTracingShaderBindingsWriter GlobalResources;
 				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
-
 				RHICmdList.RayTraceDispatch(View.RayTracingMaterialPipeline, RayGenerationShader.GetRayTracingShader(), RayTracingSceneRHI, GlobalResources, DispatchSize.X, DispatchSize.Y);
 			}
+#else
+			[&View, RayGenerationShader, PassParameters, DispatchSize, SceneUniformBufferRef, NaniteRayTracingUniformBufferRef](FRDGAsyncTask, FRHICommandList& RHICmdList)
+			{
+				FRHIBatchedShaderParameters& GlobalResources = RHICmdList.GetScratchShaderParameters();
+				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
+				FRHIUniformBuffer* SceneUB = SceneUniformBufferRef ? SceneUniformBufferRef->GetRHI() : nullptr;
+				FRHIUniformBuffer* NaniteUB = NaniteRayTracingUniformBufferRef ? NaniteRayTracingUniformBufferRef->GetRHI() : nullptr;
+				TOptional<FScopedUniformBufferStaticBindings> StaticUniformBufferScope = RayTracing::BindStaticUniformBufferBindings(View, SceneUB, NaniteUB, RHICmdList);
+				RHICmdList.RayTraceDispatch(View.MaterialRayTracingData.PipelineState, RayGenerationShader.GetRayTracingShader(), View.MaterialRayTracingData.ShaderBindingTable, GlobalResources, DispatchSize.X, DispatchSize.Y);
+			}
+#endif
 		);
 	}
 
 	void DDGIUpdateVolume_RenderThread_IrradianceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate = false)
 	{
-		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 		FDDGIIrradianceBlend::FPermutationDomain PermutationVector;
 		PermutationVector.Set<FDDGIIrradianceBlend::FRaysPerProbeEnum>(int(VolProxy->ComponentData.RaysPerProbe));
 		PermutationVector.Set<FDDGIIrradianceBlend::FEnableRelocation>(VolProxy->ComponentData.EnableProbeRelocation);
@@ -1114,7 +1154,7 @@ namespace DDGIVolumeUpdate
 
 	void DDGIUpdateVolume_RenderThread_DistanceBlend(const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, const FMatrix44f& ProbeRayRotationTransform, FRDGTextureUAVRef ProbesRadianceUAV, bool highBitCount, bool bPartialUpdate = false)
 	{
-		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 		FDDGIDistanceBlend::FPermutationDomain PermutationVector;
 		PermutationVector.Set<FDDGIDistanceBlend::FRaysPerProbeEnum>(int(VolProxy->ComponentData.RaysPerProbe));
 		PermutationVector.Set<FDDGIDistanceBlend::FEnableRelocation>(int(VolProxy->ComponentData.EnableProbeRelocation));
@@ -1193,7 +1233,7 @@ namespace DDGIVolumeUpdate
 
 		// Row
 		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 			FDDGIBorderRowUpdate::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FDDGIBorderRowUpdate::FProbeNumTexels>(FDDGIVolumeSceneProxy::FComponentData::c_NumTexelsIrradiance);
 			TShaderMapRef<FDDGIBorderRowUpdate> ComputeShader(ShaderMap, PermutationVector);
@@ -1220,7 +1260,7 @@ namespace DDGIVolumeUpdate
 
 		// Column
 		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 			FDDGIBorderColumnUpdate::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FDDGIBorderColumnUpdate::FProbeNumTexels>(FDDGIVolumeSceneProxy::FComponentData::c_NumTexelsIrradiance);
 			TShaderMapRef<FDDGIBorderColumnUpdate> ComputeShader(ShaderMap, PermutationVector);
@@ -1254,7 +1294,7 @@ namespace DDGIVolumeUpdate
 
 		// Row
 		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 			FDDGIBorderRowUpdate::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FDDGIBorderRowUpdate::FProbeNumTexels>(FDDGIVolumeSceneProxy::FComponentData::c_NumTexelsDistance);
 			TShaderMapRef<FDDGIBorderRowUpdate> ComputeShader(ShaderMap, PermutationVector);
@@ -1281,7 +1321,7 @@ namespace DDGIVolumeUpdate
 
 		// Column
 		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 			FDDGIBorderColumnUpdate::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FDDGIBorderColumnUpdate::FProbeNumTexels>(FDDGIVolumeSceneProxy::FComponentData::c_NumTexelsDistance);
 			TShaderMapRef<FDDGIBorderColumnUpdate> ComputeShader(ShaderMap, PermutationVector);
@@ -1313,7 +1353,7 @@ namespace DDGIVolumeUpdate
 		PermutationVector.Set<FDDGIProbesRelocate::FFormatRadiance>(highBitCount);
 		PermutationVector.Set<FDDGIProbesRelocate::FFormatIrradiance>(highBitCount);
 		PermutationVector.Set<FDDGIProbesRelocate::FEnableScrolling>(VolProxy->ComponentData.EnableProbeScrolling);
-		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 		TShaderMapRef<FDDGIProbesRelocate> ComputeShader(ShaderMap, PermutationVector);
 
 		// calculate grid spacing based on size (scale) and probe count
@@ -1378,7 +1418,7 @@ namespace DDGIVolumeUpdate
 		PermutationVector.Set <FDDGIProbesClassify::FFormatRadiance>(highBitCount);
 		PermutationVector.Set <FDDGIProbesClassify::FFormatIrradiance>(highBitCount);
 		PermutationVector.Set <FDDGIProbesClassify::FEnableScrolling>(VolProxy->ComponentData.EnableProbeScrolling);
-		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 		TShaderMapRef<FDDGIProbesClassify> ComputeShader(ShaderMap, PermutationVector);
 
 		// calculate grid spacing based on size (scale) and probe count

@@ -17,6 +17,7 @@
 
 // UE Public Interfaces
 #include "ConvexVolume.h"
+#include "DynamicRHI.h"
 #include "DataDrivenShaderPlatformInfo.h"
 #include "RenderGraphBuilder.h"
 #include "ShaderParameterStruct.h"
@@ -535,7 +536,7 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 		int32 numVolumes = FMath::Min(volumes.Num(), FDDGIVolumeSceneProxy::FComponentData::c_RTXGI_DDGI_MAX_SHADING_VOLUMES);
 
 		// Truncate the in-frustum volumes list to the maximum number of volumes supported
-		volumes.SetNum(numVolumes, true);
+		volumes.SetNum(numVolumes, EAllowShrinking::Yes);
 
 		// Sort the final volume list by descending probe density
 		Algo::Sort(volumes, [](const FProxyEntry& A, const FProxyEntry& B)
@@ -566,8 +567,8 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 			// Skip this shader permutation if there are no volumes that match its feature set
 			if (!foundAMatch) continue;
 
-			// Get the shader permutation
-			FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+			// Get the shader permutation (use View's feature level - SM5 may not be compiled when using SM6/ray tracing)
+			FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 			bool highBitCount = (GetDefault<URTXGIPluginSettings>()->IrradianceBits == EDDGIIrradianceBits::n32);
 			FApplyLightingDeferredShaderCS::FPermutationDomain PermutationVector;
 			PermutationVector.Set<FApplyLightingDeferredShaderCS::FLightingChannelsDim>(Resources.LightingChannelsTexture != nullptr);
@@ -717,8 +718,8 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 		RDG_GPU_STAT_SCOPE(GraphBuilder, RTXGI_UpscaleLighting);
 		RDG_EVENT_SCOPE(GraphBuilder, "RTXGI Upscale Lighting");
 
-		// Set parameters for the Upsampler CS
-		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		// Set parameters for the Upsampler CS (use View's feature level - SM5 may not be compiled when using SM6/ray tracing)
+		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 		TShaderMapRef<FUpscaleLightingShaderCS> ComputeShader(GlobalShaderMap);
 
 		FUpscaleLightingShaderParameters DefaultPassParameters;
@@ -767,7 +768,7 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 	SET_FLOAT_STAT(SAMPLES_PER_MILLI, samplesPerMilli);
 
 	//GPU Timing code from UnrealEdMisc.cpp
-	uint32 GPUCycles = GraphBuilder.RHICmdList.GetGPUFrameCycles();
+	uint32 GPUCycles = RHIGetGPUFrameCycles();
 	double RawGPUFrameTime = FPlatformTime::ToMilliseconds(GPUCycles);
 
 	float totalGpuTime = RawGPUFrameTime;

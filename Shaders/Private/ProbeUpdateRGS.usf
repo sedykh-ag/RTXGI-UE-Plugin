@@ -45,6 +45,7 @@
 
 // START RGS PARAMS
 RaytracingAccelerationStructure TLAS;
+RaytracingAccelerationStructure FarFieldTLAS;
 
 RWTexture2D<float4> RadianceOutput;
 RWTexture2D<float4> DebugOutput;
@@ -201,16 +202,20 @@ RAY_TRACING_ENTRY_RAYGEN(ProbeUpdateRGS)
     FMaterialClosestHitPayload Payload = TraceRayAndAccumulateResults(
         Ray,
         TLAS,
+        FarFieldTLAS,
         RayFlags,
         InstanceInclusionMask,
         RandSequence,
         PixelCoord,
         MaxNormalBias,
+        Ray.TMax,
         ReflectedShadowsType,
+        RAY_TRACING_SHADOWS_TRANSLUCENCY_TYPE_OPAQUE,
         bShouldDoDirectLighting,
         bShouldDoEmissiveAndIndirectLighting,
         bRayTraceSkyLightContribution,
         bDecoupleSampleGeneration,
+        false, // bIsCameraRay
         RayCone,
         bEnableSkyLightContribution,
         PathVertexRadiance);

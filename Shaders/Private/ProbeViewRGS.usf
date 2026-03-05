@@ -56,6 +56,7 @@ then "vis DDGIProbesTexture" to see the texture
 
 // START RGS PARAMS
 RaytracingAccelerationStructure TLAS;
+RaytracingAccelerationStructure FarFieldTLAS;
 
 uint        FrameRandomSeed;
 
@@ -118,16 +119,20 @@ RAY_TRACING_ENTRY_RAYGEN(ProbeViewRGS)
     FMaterialClosestHitPayload Payload = TraceRayAndAccumulateResults(
         Ray,
         TLAS,
+        FarFieldTLAS,
         RayFlags,
         InstanceInclusionMask,
         RandSequence,
         PixelCoord,
         MaxNormalBias,
+        Ray.TMax,
         ReflectedShadowsType,
+        RAY_TRACING_SHADOWS_TRANSLUCENCY_TYPE_OPAQUE,
         bShouldDoDirectLighting,
         bShouldDoEmissiveAndIndirectLighting,
         bRayTraceSkyLightContribution,
         bDecoupleSampleGeneration,
+        false, // bIsCameraRay
         RayCone,
         bEnableSkyLightContribution,
         PathVertexRadiance);

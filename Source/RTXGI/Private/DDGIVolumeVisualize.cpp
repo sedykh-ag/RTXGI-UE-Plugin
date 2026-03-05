@@ -322,7 +322,8 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectVisualizations_RenderThread(
 		PermutationVectorPS.Set<FVolumeVisualizeShaderPS::FFormatRadiance>(highBitCount);
 		PermutationVectorPS.Set<FVolumeVisualizeShaderPS::FFormatIrradiance>(highBitCount);
 
-		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(ERHIFeatureLevel::SM5);
+		// Use View's feature level - SM5 may not be compiled when using SM6/ray tracing
+		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 		TShaderMapRef<FVolumeVisualizeShaderVS> VertexShader(GlobalShaderMap, PermutationVectorVS);
 		TShaderMapRef<FVolumeVisualizeShaderPS> PixelShader(GlobalShaderMap, PermutationVectorPS);
 
@@ -443,9 +444,9 @@ static bool MemoryUseExec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 				if (proxy->ProbesIrradiance)
 				{
 #if ENGINE_MAJOR_VERSION < 5
-					FRHITexture2D* texture = proxy->ProbesIrradiance->GetShaderResourceRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesIrradiance->GetShaderResourceRHI();
 #else
-					FRHITexture2D* texture = proxy->ProbesIrradiance->GetRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesIrradiance->GetRHI();
 #endif
 					if (texture)
 						info.irradianceBytes = texture->GetSizeX()* texture->GetSizeY()* GPixelFormats[texture->GetFormat()].BlockBytes;
@@ -454,9 +455,9 @@ static bool MemoryUseExec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 				if (proxy->ProbesDistance)
 				{
 #if ENGINE_MAJOR_VERSION < 5
-					FRHITexture2D* texture = proxy->ProbesDistance->GetShaderResourceRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesDistance->GetShaderResourceRHI();
 #else
-					FRHITexture2D* texture = proxy->ProbesDistance->GetRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesDistance->GetRHI();
 #endif
 					if (texture)
 						info.distanceBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;
@@ -465,9 +466,9 @@ static bool MemoryUseExec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 				if (proxy->ProbesOffsets)
 				{
 #if ENGINE_MAJOR_VERSION < 5
-					FRHITexture2D* texture = proxy->ProbesOffsets->GetShaderResourceRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesOffsets->GetShaderResourceRHI();
 #else
-					FRHITexture2D* texture = proxy->ProbesOffsets->GetRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesOffsets->GetRHI();
 #endif
 					if (texture)
 						info.offsetsBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;
@@ -476,9 +477,9 @@ static bool MemoryUseExec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 				if (proxy->ProbesStates)
 				{
 #if ENGINE_MAJOR_VERSION < 5
-					FRHITexture2D* texture = proxy->ProbesStates->GetShaderResourceRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesStates->GetShaderResourceRHI();
 #else
-					FRHITexture2D* texture = proxy->ProbesStates->GetRHI()->GetTexture2D();
+					FRHITexture* texture = proxy->ProbesStates->GetRHI();
 #endif
 					if (texture)
 						info.statesBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;

@@ -46,13 +46,14 @@ public class RTXGI : ModuleRules
 			"Projects"
 		});
 
-		PrivateIncludePaths.AddRange(new string[]
-		{
-			EngineDirectory + "/Source/Runtime/Renderer/Private",
-			EngineDirectory + "/Source/Runtime/RenderCore/Public",
-		});
+        PrivateIncludePaths.AddRange(new string[]
+        {
+            EngineDirectory + "/Source/Runtime/Renderer/Private",
+            EngineDirectory + "/Source/Runtime/Renderer/Internal",
+            EngineDirectory + "/Source/Runtime/RenderCore/Public",
+        });
 
-		PublicIncludePaths.AddRange(new string[]
+        PublicIncludePaths.AddRange(new string[]
 		{
 			"../Shaders/Shared"
 		});
