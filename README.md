@@ -1,4 +1,4 @@
-# RTXGI Unreal Engine Plugin
+# RTXGI Unreal Engine Plugin (updated for UE 5.6)
 
 ## Maintenance Note
 
