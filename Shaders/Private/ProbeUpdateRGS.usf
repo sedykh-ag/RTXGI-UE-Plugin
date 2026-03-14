@@ -171,9 +171,13 @@ RAY_TRACING_ENTRY_RAYGEN(ProbeUpdateRGS)
 
     float3 probeRayDirection = DDGIGetProbeRayDirection(rayIndex, DDGIVolume.numRaysPerProbe, DDGIVolume.probeRayRotationTransform);
 
-    // Setup the probe ray
+    // Setup the probe ray (ray origin in TLAS/translated world space)
+    const float3 TLASPreViewTranslation = View.TLASPreViewTranslationHigh + View.TLASPreViewTranslationLow;
+    const float3 worldRayOrigin = probeWorldPosition;
+    const float3 translatedRayOrigin = worldRayOrigin + TLASPreViewTranslation;
+
     FRayDesc Ray;
-    Ray.Origin = probeWorldPosition;
+    Ray.Origin = translatedRayOrigin;
     Ray.Direction = probeRayDirection;
     Ray.TMin = 0.f;
     Ray.TMax = DDGIVolume.probeMaxRayDistance;
@@ -286,7 +290,7 @@ RAY_TRACING_ENTRY_RAYGEN(ProbeUpdateRGS)
         DDGIVolume_0.probeScrollOffsets = DDGIVolume.probeScrollOffsets;
 
         // Get irradiance from the DDGIVolume
-        float3 surfacePosWS = Ray.Origin + Ray.Direction * Payload.HitT;
+        float3 surfacePosWS = worldRayOrigin + Ray.Direction * Payload.HitT;
         float3 surfaceBias = DDGIGetSurfaceBias(Payload.WorldNormal, Ray.Direction, DDGIVolume_0);
         float3 irradiance = DDGIGetVolumeIrradiance(
             surfacePosWS,
