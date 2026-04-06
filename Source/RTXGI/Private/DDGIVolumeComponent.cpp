@@ -13,7 +13,6 @@
 #include "DDGIVolumeUpdate.h"
 
 #include "RTXGIPluginSettings.h"
-#include "LegacyEngineCompat.h"
 
 // UE Public Interfaces
 #include "ConvexVolume.h"
@@ -153,11 +152,6 @@ public:
 
 		// needed for a typed UAV load. This already assumes we are raytracing, so should be fine.
 		OutEnvironment.CompilerFlags.Add(CFLAG_AllowTypedUAVLoads);
-#if ENGINE_MAJOR_VERSION < 5
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 1);
-#else
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 0);
-#endif
 	}
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -180,11 +174,6 @@ public:
 
 		// needed for a typed UAV load. This already assumes we are raytracing, so should be fine.
 		OutEnvironment.CompilerFlags.Add(CFLAG_AllowTypedUAVLoads);
-#if ENGINE_MAJOR_VERSION < 5
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 1);
-#else
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 0);
-#endif
 	}
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -284,11 +273,7 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		EPixelFormat Format = (IrradianceBits == EDDGIIrradianceBits::n32) ? FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatIrradianceHighBitDepth : FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatIrradianceLowBitDepth;
 
 		FPooledRenderTargetDesc Desc(FPooledRenderTargetDesc::Create2DDesc(ProxyTexDims, Format, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV , false));
-#if ENGINE_MAJOR_VERSION < 5
-		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesIrradiance, TEXT("DDGIIrradiance"), ERenderTargetTransience::NonTransient);
-#else
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesIrradiance, TEXT("DDGIIrradiance"));
-#endif
 	}
 
 	// Distance
@@ -297,11 +282,7 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		EPixelFormat Format = (DistanceBits == EDDGIDistanceBits::n32) ? FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatDistanceHighBitDepth : FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatDistanceLowBitDepth;
 
 		FPooledRenderTargetDesc Desc(FPooledRenderTargetDesc::Create2DDesc(ProxyTexDims, Format, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false));
-#if ENGINE_MAJOR_VERSION < 5
-		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesDistance, TEXT("DDGIDistance"), ERenderTargetTransience::NonTransient);
-#else
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesDistance, TEXT("DDGIDistance"));
-#endif
 	}
 
 	// Offsets - only pay the cost of this resource if this volume is actually doing relocation
@@ -310,11 +291,7 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		EPixelFormat Format = FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatOffsets;
 
 		FPooledRenderTargetDesc Desc(FPooledRenderTargetDesc::Create2DDesc(ProxyDims, Format, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false));
-#if ENGINE_MAJOR_VERSION < 5
-		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesOffsets, TEXT("DDGIOffsets"), ERenderTargetTransience::NonTransient);
-#else
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesOffsets, TEXT("DDGIOffsets"));
-#endif
 	}
 	else
 	{
@@ -327,11 +304,7 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		EPixelFormat Format = FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatStates;
 
 		FPooledRenderTargetDesc Desc(FPooledRenderTargetDesc::Create2DDesc(ProxyDims, Format, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false));
-#if ENGINE_MAJOR_VERSION < 5
-		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesStates, TEXT("DDGIStates"), ERenderTargetTransience::NonTransient);
-#else
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesStates, TEXT("DDGIStates"));
-#endif
 	}
 	else
 	{
@@ -343,11 +316,7 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		EPixelFormat Format = FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatScrollSpace;
 
 		FPooledRenderTargetDesc Desc(FPooledRenderTargetDesc::Create2DDesc(ProxyDims, Format, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false));
-#if ENGINE_MAJOR_VERSION < 5
-		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesSpace, TEXT("DDGIScrollSpace"), ERenderTargetTransience::NonTransient);
-#else
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesSpace, TEXT("DDGIScrollSpace"));
-#endif
 	}
 	else
 	{
@@ -441,19 +410,11 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 	}
 
 	// Register the GBuffer textures with the render graph
-#if ENGINE_MAJOR_VERSION < 5
-	FRDGTextureRef GBufferATexture = GraphBuilder.RegisterExternalTexture(Resources.GBufferA);
-	FRDGTextureRef GBufferBTexture = GraphBuilder.RegisterExternalTexture(Resources.GBufferB);
-	FRDGTextureRef GBufferCTexture = GraphBuilder.RegisterExternalTexture(Resources.GBufferC);
-	FRDGTextureRef SceneDepthTexture = GraphBuilder.RegisterExternalTexture(Resources.SceneDepthZ);
-	FRDGTextureRef SceneColorTexture = GraphBuilder.RegisterExternalTexture(Resources.SceneColor);
-#else
 	FRDGTextureRef GBufferATexture = Resources.GBufferA;
 	FRDGTextureRef GBufferBTexture = Resources.GBufferB;
 	FRDGTextureRef GBufferCTexture = Resources.GBufferC;
 	FRDGTextureRef SceneDepthTexture = Resources.SceneDepthZ;
 	FRDGTextureRef SceneColorTexture = Resources.SceneColor;
-#endif
 	if (!View.bUsesLightingChannels) Resources.LightingChannelsTexture = nullptr;
 
 	float ScreenScale = FMath::Clamp(CVarLightingPassScale.GetValueOnRenderThread(), 0.25f, 1.0f);
@@ -1003,17 +964,10 @@ void UDDGIVolumeComponent::Serialize(FArchive& Ar)
 					ENQUEUE_RENDER_COMMAND(DDGISaveTexStep1)(
 						[&Irradiance, &Distance, &Offsets, &States, proxy](FRHICommandListImmediate& RHICmdList)
 						{
-#if ENGINE_MAJOR_VERSION < 5
-							Irradiance = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesIrradiance->GetTargetableRHI());
-							Distance = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesDistance->GetTargetableRHI());
-							Offsets = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesOffsets ? proxy->ProbesOffsets->GetTargetableRHI() : nullptr);
-							States = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesStates ? proxy->ProbesStates->GetTargetableRHI() : nullptr);
-#else
 							Irradiance = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesIrradiance->GetRHI());
 							Distance = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesDistance->GetRHI());
 							Offsets = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesOffsets ? proxy->ProbesOffsets->GetRHI() : nullptr);
 							States = GetTexturePixelsStep1_RenderThread(RHICmdList, proxy->ProbesStates ? proxy->ProbesStates->GetRHI() : nullptr);
-#endif
 						}
 					);
 					FlushRenderingCommands();
@@ -1390,17 +1344,10 @@ void UDDGIVolumeComponent::DestroyRenderState_Concurrent()
 					else
 					{
 						ComponentLoadContext.ReadyForLoad = true;
-#if ENGINE_MAJOR_VERSION < 5
-						ComponentLoadContext.Irradiance = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesIrradiance->GetTargetableRHI());
-						ComponentLoadContext.Distance = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesDistance->GetTargetableRHI());
-						ComponentLoadContext.Offsets = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesOffsets ? DDGIProxy->ProbesOffsets->GetTargetableRHI() : nullptr);
-						ComponentLoadContext.States = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesStates ? DDGIProxy->ProbesStates->GetTargetableRHI() : nullptr);
-#else
 						ComponentLoadContext.Irradiance = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesIrradiance->GetRHI());
 						ComponentLoadContext.Distance = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesDistance->GetRHI());
 						ComponentLoadContext.Offsets = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesOffsets ? DDGIProxy->ProbesOffsets->GetRHI() : nullptr);
 						ComponentLoadContext.States = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesStates ? DDGIProxy->ProbesStates->GetRHI() : nullptr);
-#endif
 					}
 				}
 

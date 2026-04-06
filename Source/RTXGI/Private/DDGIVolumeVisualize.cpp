@@ -12,7 +12,6 @@
 #include "DDGIVolume.h"
 #include "DDGIVolumeUpdate.h"
 #include "RTXGIPluginSettings.h"
-#include "LegacyEngineCompat.h"
 
 #include "RenderGraphBuilder.h"
 #include "ShaderParameterStruct.h"
@@ -170,11 +169,7 @@ public:
 		uint32 Size = Verts.GetResourceDataSize();
 
 		// Create vertex buffer. Fill buffer with initial data upon creation
-#if ENGINE_MAJOR_VERSION < 5
-		FRHIResourceCreateInfo CreateInfo(&Verts);
-#else
 		FRHIResourceCreateInfo CreateInfo(TEXT("TDDGIProbeSphereVertexBuffer"), &Verts);
-#endif
 		VertexBufferRHI = RHICmdList.CreateVertexBuffer(Size, BUF_Static, CreateInfo);
 	}
 
@@ -222,11 +217,7 @@ public:
 		const uint32 Stride = sizeof(uint16);
 
 		// Create index buffer. Fill buffer with initial data upon creation
-#if ENGINE_MAJOR_VERSION < 5
-		FRHIResourceCreateInfo CreateInfo(&Indices);
-#else
 		FRHIResourceCreateInfo CreateInfo(TEXT("TDDGIProbeSphereIndexBuffer"), &Indices);
-#endif
 		IndexBufferRHI = RHICmdList.CreateIndexBuffer(Stride, Size, BUF_Static, CreateInfo);
 	}
 
@@ -288,13 +279,8 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectVisualizations_RenderThread(
 
 	// Get other things we'll need for all proxies
 	FIntRect ViewRect = View.ViewRect;
-#if ENGINE_MAJOR_VERSION < 5
-	FRDGTextureRef SceneColorTexture = GraphBuilder.RegisterExternalTexture(Resources.SceneColor);
-	FRDGTextureRef SceneDepthTexture = GraphBuilder.RegisterExternalTexture(Resources.SceneDepthZ);
-#else
 	FRDGTextureRef SceneColorTexture = Resources.SceneColor;
 	FRDGTextureRef SceneDepthTexture = Resources.SceneDepthZ;
-#endif
 
 	for (FDDGIVolumeSceneProxy* proxy : FDDGIVolumeSceneProxy::AllProxiesReadyForRender_RenderThread)
 	{
@@ -391,11 +377,7 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectVisualizations_RenderThread(
 				GraphicsPSOInit.BoundShaderState.VertexShaderRHI = VertexShader.GetVertexShader();
 				GraphicsPSOInit.BoundShaderState.PixelShaderRHI = PixelShader.GetPixelShader();
 				GraphicsPSOInit.PrimitiveType = PT_TriangleList;
-#if ENGINE_MAJOR_VERSION < 5
-				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit);
-#else
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-#endif
 
 				SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(), *PassParameters);
 				SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(), *PassParameters);
@@ -443,44 +425,28 @@ static bool MemoryUseExec(UWorld* InWorld, const TCHAR* Cmd, FOutputDevice& Ar)
 
 				if (proxy->ProbesIrradiance)
 				{
-#if ENGINE_MAJOR_VERSION < 5
-					FRHITexture* texture = proxy->ProbesIrradiance->GetShaderResourceRHI();
-#else
 					FRHITexture* texture = proxy->ProbesIrradiance->GetRHI();
-#endif
 					if (texture)
 						info.irradianceBytes = texture->GetSizeX()* texture->GetSizeY()* GPixelFormats[texture->GetFormat()].BlockBytes;
 				}
 
 				if (proxy->ProbesDistance)
 				{
-#if ENGINE_MAJOR_VERSION < 5
-					FRHITexture* texture = proxy->ProbesDistance->GetShaderResourceRHI();
-#else
 					FRHITexture* texture = proxy->ProbesDistance->GetRHI();
-#endif
 					if (texture)
 						info.distanceBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;
 				}
 
 				if (proxy->ProbesOffsets)
 				{
-#if ENGINE_MAJOR_VERSION < 5
-					FRHITexture* texture = proxy->ProbesOffsets->GetShaderResourceRHI();
-#else
 					FRHITexture* texture = proxy->ProbesOffsets->GetRHI();
-#endif
 					if (texture)
 						info.offsetsBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;
 				}
 
 				if (proxy->ProbesStates)
 				{
-#if ENGINE_MAJOR_VERSION < 5
-					FRHITexture* texture = proxy->ProbesStates->GetShaderResourceRHI();
-#else
 					FRHITexture* texture = proxy->ProbesStates->GetRHI();
-#endif
 					if (texture)
 						info.statesBytes = texture->GetSizeX() * texture->GetSizeY() * GPixelFormats[texture->GetFormat()].BlockBytes;
 				}

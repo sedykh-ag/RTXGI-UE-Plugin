@@ -11,7 +11,7 @@
 #ifndef RTXGI_DDGI_VOLUME_DESC_GPU_H
 #define RTXGI_DDGI_VOLUME_DESC_GPU_H
 
-#include "LegacyEngineCompat.h"
+#include "CoreMinimal.h"
 
 
 /**

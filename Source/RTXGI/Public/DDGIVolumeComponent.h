@@ -10,7 +10,7 @@
 
 #pragma once
 
-// UE4 public interfaces
+// Unreal Engine public interfaces
 #include "CoreMinimal.h"
 #include "UObject/ObjectMacros.h"
 #include "Engine/EngineTypes.h"
@@ -18,7 +18,6 @@
 #include "RHI.h"
 #include "RHIResources.h"
 #include "RendererInterface.h"
-#include "Runtime/Launch/Resources/Version.h"
 
 #include "DDGIUtilities.h"
 
@@ -30,11 +29,7 @@ class FScene;
 class FSceneInterface;
 class FSceneRenderTargets;
 class FViewInfo;
-#if ENGINE_MAJOR_VERSION < 5
-using FGlobalIlluminationPluginResources = class FGlobalIlluminationExperimentalPluginResources;
-#else
 class FGlobalIlluminationPluginResources;
-#endif
 
 enum class EDDGIIrradianceBits : uint8;
 enum class EDDGIDistanceBits : uint8;
@@ -161,13 +156,8 @@ public:
 
 		EDDGIRaysPerProbe RaysPerProbe = EDDGIRaysPerProbe::n144;
 		float ProbeMaxRayDistance = 1000.0f;
-#if ENGINE_MAJOR_VERSION < 5
-		FTransform Transform = FTransform::Identity;
-		FVector Origin = FVector(0.0f);
-#else
 		FTransform3f Transform = FTransform3f::Identity;
 		FVector3f Origin = FVector3f(0.0f);
-#endif
 		FLightingChannels LightingChannels;
 		FIntVector ProbeCounts = FIntVector(0); // 0 = invalid, will be written with valid counts before use
 		float ProbeDistanceExponent = 1.0f;
@@ -514,10 +504,6 @@ public:
 
 	FIntVector PrevProbeCounts = FIntVector(0);
 
-#if ENGINE_MAJOR_VERSION < 5
-	FVector LastOrigin = FVector{ 0.0f, 0.0f, 0.0f };
-#else
 	FVector3f LastOrigin = FVector3f{ 0.0f, 0.0f, 0.0f };
-#endif
 	FIntVector ProbeScrollOffset = FIntVector{ 0, 0, 0 };
 };

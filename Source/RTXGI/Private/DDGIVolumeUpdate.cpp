@@ -45,7 +45,6 @@
 // local includes
 #include "DDGIVolumeComponent.h"
 #include "DDGIVolumeDescGPU.h"
-#include "LegacyEngineCompat.h"
 
 #define LOCTEXT_NAMESPACE "FRTXGIPlugin"
 
@@ -178,12 +177,6 @@ class FRayTracingRTXGIProbeUpdateRGS : public FGlobalShader
 		// Set to 1 to be able to visualize this in the editor by typing "vis DDGIVolumeUpdateDebug" and later "vis none" to make it go away.
 		// Set to 0 to disable and deadstrip everything related
 		OutEnvironment.SetDefine(TEXT("DDGIVolumeUpdateDebug"), WITH_EDITOR);
-
-#if ENGINE_MAJOR_VERSION < 5
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 1);
-#else
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 0);
-#endif
 	}
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -254,11 +247,6 @@ class FRayTracingRTXGIProbeViewRGS : public FGlobalShader
 
 		OutEnvironment.SetDefine(TEXT("RTXGI_DDGI_PROBE_CLASSIFICATION"), FDDGIVolumeSceneProxy::FComponentData::c_RTXGI_DDGI_PROBE_CLASSIFICATION ? 1 : 0);
 		OutEnvironment.SetDefine(TEXT("RTXGI_DDGI_PROBE_RELOCATION"), 0);
-#if ENGINE_MAJOR_VERSION < 5
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 1);
-#else
-		OutEnvironment.SetDefine(TEXT("UE4_COMPAT"), 0);
-#endif
 	}
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -770,26 +758,15 @@ namespace DDGIVolumeUpdate
 		}
 	}
 
-#if ENGINE_MAJOR_VERSION < 5
-	bool ShouldDynamicUpdate(const FViewInfo& View)
-	{
-		return ShouldRenderRayTracingEffect(true) && View.RayTracingScene.RayTracingSceneRHI != nullptr;
-	}
-#else
 	bool ShouldDynamicUpdate(const FScene& Scene)
 	{
 		return ShouldRenderRayTracingEffect(true) && Scene.RayTracingScene.GetRHIRayTracingScene(ERayTracingSceneLayer::Base) != nullptr;
 	}
-#endif
 
 	void DDGIUpdateVolume_RenderThread(const FScene& Scene, const FViewInfo& View, FRDGBuilder& GraphBuilder, FDDGIVolumeSceneProxy* VolProxy, bool bPartialUpdate)
 	{
 		// Early out if ray tracing is not enabled
-#if ENGINE_MAJOR_VERSION < 5
-		if (!ShouldDynamicUpdate(View)) return;
-#else
 		if (!ShouldDynamicUpdate(Scene)) return;
-#endif
 
 		bool highBitCount = (GetDefault<URTXGIPluginSettings>()->IrradianceBits == EDDGIIrradianceBits::n32);
 
@@ -838,11 +815,7 @@ namespace DDGIVolumeUpdate
 	{
 		// Early out if not visualizing probes
 		int DDGIProbesTextureVis = FMath::Clamp(CVarDDGIProbesTextureVis.GetValueOnRenderThread(), 0, 3);
-#if ENGINE_MAJOR_VERSION < 5
-		if (DDGIProbesTextureVis == 0 || View.RayTracingScene.RayTracingSceneRHI == nullptr) return;
-#else
 		if (DDGIProbesTextureVis == 0 || Scene.RayTracingScene.GetRHIRayTracingScene(ERayTracingSceneLayer::Base) == nullptr) return;
-#endif
 
 		static const int c_probeVisWidth = 800;
 		static const int c_probeVisHeight = 600;
@@ -908,14 +881,6 @@ namespace DDGIVolumeUpdate
 			RDG_EVENT_NAME("DDGI RTRadiance %dx%d", DispatchSize.X, DispatchSize.Y),
 			PassParameters,
 			ERDGPassFlags::Compute,
-#if ENGINE_MAJOR_VERSION < 5
-			[PassParameters, RayTracingSceneRHI = View.RayTracingScene.RayTracingSceneRHI, &View, RayGenerationShader, DispatchSize](FRHICommandList& RHICmdList)
-			{
-				FRayTracingShaderBindingsWriter GlobalResources;
-				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
-				RHICmdList.RayTraceDispatch(View.RayTracingMaterialPipeline, RayGenerationShader.GetRayTracingShader(), RayTracingSceneRHI, GlobalResources, DispatchSize.X, DispatchSize.Y);
-			}
-#else
 			[&View, RayGenerationShader, PassParameters, DispatchSize, SceneUniformBufferRef, NaniteRayTracingUniformBufferRef](FRDGAsyncTask, FRHICommandList& RHICmdList)
 			{
 				FRHIBatchedShaderParameters& GlobalResources = RHICmdList.GetScratchShaderParameters();
@@ -925,7 +890,6 @@ namespace DDGIVolumeUpdate
 				TOptional<FScopedUniformBufferStaticBindings> StaticUniformBufferScope = RayTracing::BindStaticUniformBufferBindings(View, SceneUB, NaniteUB, RHICmdList);
 				RHICmdList.RayTraceDispatch(View.MaterialRayTracingData.PipelineState, RayGenerationShader.GetRayTracingShader(), View.MaterialRayTracingData.ShaderBindingTable, GlobalResources, DispatchSize.X, DispatchSize.Y);
 			}
-#endif
 		);
 	}
 #endif //!(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -1056,15 +1020,6 @@ namespace DDGIVolumeUpdate
 			RDG_EVENT_NAME("DDGI RTRadiance %dx%d", DispatchSize.X, DispatchSize.Y),
 			PassParameters,
 			ERDGPassFlags::Compute,
-#if ENGINE_MAJOR_VERSION < 5
-			[PassParameters, RayTracingSceneRHI = View.RayTracingScene.RayTracingSceneRHI, &View, RayGenerationShader, DispatchSize, ProbesRadianceTex]
-			(FRHICommandList& RHICmdList)
-			{
-				FRayTracingShaderBindingsWriter GlobalResources;
-				SetShaderParameters(GlobalResources, RayGenerationShader, *PassParameters);
-				RHICmdList.RayTraceDispatch(View.RayTracingMaterialPipeline, RayGenerationShader.GetRayTracingShader(), RayTracingSceneRHI, GlobalResources, DispatchSize.X, DispatchSize.Y);
-			}
-#else
 			[&View, RayGenerationShader, PassParameters, DispatchSize, SceneUniformBufferRef, NaniteRayTracingUniformBufferRef](FRDGAsyncTask, FRHICommandList& RHICmdList)
 			{
 				FRHIBatchedShaderParameters& GlobalResources = RHICmdList.GetScratchShaderParameters();
@@ -1074,7 +1029,6 @@ namespace DDGIVolumeUpdate
 				TOptional<FScopedUniformBufferStaticBindings> StaticUniformBufferScope = RayTracing::BindStaticUniformBufferBindings(View, SceneUB, NaniteUB, RHICmdList);
 				RHICmdList.RayTraceDispatch(View.MaterialRayTracingData.PipelineState, RayGenerationShader.GetRayTracingShader(), View.MaterialRayTracingData.ShaderBindingTable, GlobalResources, DispatchSize.X, DispatchSize.Y);
 			}
-#endif
 		);
 	}
 
@@ -1130,13 +1084,8 @@ namespace DDGIVolumeUpdate
 			PassParameters->DDGIProbeScrollSpace = GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(VolProxy->ProbesSpace));
 
 		FRDGTextureDesc DDGIDebugOutputDesc = FRDGTextureDesc::Create2D(
-#if ENGINE_MAJOR_VERSION < 5
-			VolProxy->ProbesIrradiance->GetTargetableRHI()->GetTexture2D()->GetSizeXY(),
-			VolProxy->ProbesIrradiance->GetTargetableRHI()->GetFormat(),
-#else
 			VolProxy->ProbesIrradiance->GetRHI()->GetTexture2D()->GetSizeXY(),
 			VolProxy->ProbesIrradiance->GetRHI()->GetFormat(),
-#endif
 			FClearValueBinding::None,
 			TexCreate_ShaderResource | TexCreate_UAV
 		);
@@ -1203,13 +1152,8 @@ namespace DDGIVolumeUpdate
 			PassParameters->DDGIProbeScrollSpace = GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(VolProxy->ProbesSpace));
 
 		FRDGTextureDesc DDGIDebugOutputDesc = FRDGTextureDesc::Create2D(
-#if ENGINE_MAJOR_VERSION < 5
-			VolProxy->ProbesDistance->GetTargetableRHI()->GetTexture2D()->GetSizeXY(),
-			VolProxy->ProbesDistance->GetTargetableRHI()->GetFormat(),
-#else
 			VolProxy->ProbesDistance->GetRHI()->GetTexture2D()->GetSizeXY(),
 			VolProxy->ProbesDistance->GetRHI()->GetFormat(),
-#endif
 			FClearValueBinding::None,
 			TexCreate_ShaderResource | TexCreate_UAV
 		);

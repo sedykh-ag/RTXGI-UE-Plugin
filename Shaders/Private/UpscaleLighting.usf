@@ -91,11 +91,7 @@ float GetTapWeight(int2 PixelIndex, float SceneDepth, float3 WorldPosition, floa
     float2 TapBufferUV = (TapScreenUV * View.ViewSizeAndInvSize.xy + View.ViewRectMin.xy) * View.BufferSizeAndInvSize.zw;
     float TapDeviceZ = DepthTexture.SampleLevel(PointClampSampler, TapBufferUV, 0.f).r;
     float TapSceneDepth = ConvertFromDeviceZ(TapDeviceZ);
-#if UE4_COMPAT
-    float3 TapWorldPosition = GBufferNearestInScreenVector * TapSceneDepth + View.WorldCameraOrigin;
-#else
     float3 TapWorldPosition = GBufferNearestInScreenVector * TapSceneDepth + LWCHackToFloat(PrimaryView.WorldCameraOrigin);
-#endif
     float3 TapNormal = normalize(DecodeNormal(NormalTexture.SampleLevel(PointClampSampler, TapBufferUV, 0.f).xyz));
 
     return GetGeometryWeight(SceneDepth, WorldPosition, Normal, TapWorldPosition, TapNormal);
@@ -120,11 +116,7 @@ void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
 
     float DeviceZ = DepthTexture.Load(int3(PixelIndex, 0)).r;
     float SceneDepth = ConvertFromDeviceZ(DeviceZ);
-#if UE4_COMPAT
-    float3 WorldPosition = InScreenVector * SceneDepth + View.WorldCameraOrigin;
-#else
     float3 WorldPosition = InScreenVector * SceneDepth + LWCHackToFloat(PrimaryView.WorldCameraOrigin);
-#endif
     float3 Normal = normalize(DecodeNormal(NormalTexture.Load(int3(PixelIndex, 0)).xyz));
 
     float3 Albedo = GetAlbedo(PixelIndex);

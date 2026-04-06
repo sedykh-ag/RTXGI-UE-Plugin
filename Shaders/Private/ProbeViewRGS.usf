@@ -28,16 +28,6 @@ then "vis DDGIProbesTexture" to see the texture
 //macro to deal with parameter not used by miss shaders
 #define OcclusionCullDirection 0
 
-#if UE4_COMPAT
-// from RayTracingPrimaryRays.usf - see that .cpp for how to pass all these params properly
-#define LTCMatTexture               RaytracingLightsDataPacked.LTCMatTexture
-#define LTCMatSampler               RaytracingLightsDataPacked.LTCMatSampler
-#define LTCAmpTexture               RaytracingLightsDataPacked.LTCAmpTexture
-#define LTCAmpSampler               RaytracingLightsDataPacked.LTCAmpSampler
-#define PreIntegratedGF             ReflectionStruct.PreIntegratedGF
-#define PreIntegratedGFSampler      ReflectionStruct.PreIntegratedGFSampler
-#endif
-
 #include "/Engine/Private/DeferredLightingCommon.ush"
 #include "/Engine/Private/DeferredShadingCommon.ush"
 #include "/Engine/Private/PathTracing/Utilities/PathTracingRandomSequence.ush"
