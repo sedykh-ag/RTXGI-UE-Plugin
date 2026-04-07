@@ -37,6 +37,7 @@ uint                NumVolumes;
 // generate an array of structures for each probe volume
 #define VOLUME_ENTRY(x) \
     Texture2D<float4> DDGIVolume_##x##_ProbeIrradiance; \
+    Texture2D<float4> DDGIVolume_##x##_ProbeIrradianceB; \
     Texture2D<float4> DDGIVolume_##x##_ProbeDistance; \
     Texture2D<float4> DDGIVolume_##x##_ProbeOffsets; \
     Texture2D<uint> DDGIVolume_##x##_ProbeStates; \
@@ -55,12 +56,14 @@ uint                NumVolumes;
     float  DDGIVolume_##x##_BlendDistanceBlack; \
     float  DDGIVolume_##x##_ApplyLighting; \
     int3   DDGIVolume_##x##_ProbeScrollOffsets; \
-    float  DDGIVolume_##x##_IrradianceScalar;
+    float  DDGIVolume_##x##_IrradianceScalar; \
+    float  DDGIVolume_##x##_IrradianceTimeOfDayBlend;
 VOLUME_LIST
 #undef VOLUME_ENTRY
 
 float4 ApplyVolumeLightingContribution(
     Texture2D<float4> ProbeIrradiance,
+    Texture2D<float4> ProbeIrradianceB,
     Texture2D<float4> ProbeDistance,
     Texture2D<float4> ProbeOffsets,
     Texture2D<uint> ProbeStates,
@@ -75,7 +78,8 @@ float4 ApplyVolumeLightingContribution(
     float BlendDistance,
     float BlendDistanceBlack,
     float ApplyLighting,
-    float IrradianceScalar)
+    float IrradianceScalar,
+    float IrradianceTimeOfDayBlend)
 {
     // Ignore the DDGIVolume if the lighting mask doesn't overlap
     #if USE_LIGHTING_CHANNELS
@@ -95,27 +99,39 @@ float4 ApplyVolumeLightingContribution(
     if (ApplyLighting > 0.0f)
     {
         // Fill out a DDGIVolumeResources
-        DDGIVolumeResources Resources;
+        DDGIVolumeResources ResourcesA;
         {
-            Resources.probeIrradianceSRV = ProbeIrradiance;
-            Resources.probeDistanceSRV = ProbeDistance;
-            Resources.bilinearSampler = LinearClampSampler;
+            ResourcesA.probeIrradianceSRV = ProbeIrradiance;
+            ResourcesA.probeDistanceSRV = ProbeDistance;
+            ResourcesA.bilinearSampler = LinearClampSampler;
         #if RTXGI_DDGI_PROBE_RELOCATION
-            Resources.probeOffsetsSRV = ProbeOffsets;
+            ResourcesA.probeOffsetsSRV = ProbeOffsets;
         #endif
         #if RTXGI_DDGI_PROBE_CLASSIFICATION
-            Resources.probeStatesSRV = ProbeStates;
+            ResourcesA.probeStatesSRV = ProbeStates;
         #endif
         }
 
         float3 SurfaceBias = DDGIGetSurfaceBias(Normal, CameraDirection, Volume);
-        float3 Irradiance = DDGIGetVolumeIrradiance(
+        float3 IrradianceA = DDGIGetVolumeIrradiance(
             WorldPosition,
             SurfaceBias,
             Normal,
             Volume,
-            Resources
+            ResourcesA
         );
+
+        DDGIVolumeResources ResourcesB = ResourcesA;
+        ResourcesB.probeIrradianceSRV = ProbeIrradianceB;
+        float3 IrradianceB = DDGIGetVolumeIrradiance(
+            WorldPosition,
+            SurfaceBias,
+            Normal,
+            Volume,
+            ResourcesB
+        );
+
+        float3 Irradiance = lerp(IrradianceA, IrradianceB, saturate(IrradianceTimeOfDayBlend));
 
         LightWeight.rgb = Irradiance * (Albedo / RTXGI_PI) / IrradianceScalar;
     }
@@ -201,6 +217,7 @@ void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
         { \
             float4 LightWeight = ApplyVolumeLightingContribution( \
                 DDGIVolume_##x##_ProbeIrradiance, \
+                DDGIVolume_##x##_ProbeIrradianceB, \
                 DDGIVolume_##x##_ProbeDistance, \
                 DDGIVolume_##x##_ProbeOffsets, \
                 DDGIVolume_##x##_ProbeStates, \
@@ -215,7 +232,8 @@ void MainCS(uint3 DispatchThreadID : SV_DispatchThreadID)
                 DDGIVolume_##x##_BlendDistance, \
                 DDGIVolume_##x##_BlendDistanceBlack, \
                 DDGIVolume_##x##_ApplyLighting, \
-                DDGIVolume_##x##_IrradianceScalar); \
+                DDGIVolume_##x##_IrradianceScalar, \
+                DDGIVolume_##x##_IrradianceTimeOfDayBlend); \
             \
             if (AccLightWeight.a == 0.f) \
             { \

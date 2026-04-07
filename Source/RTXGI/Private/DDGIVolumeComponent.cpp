@@ -69,6 +69,7 @@ static TAutoConsoleVariable<int> CVarStatVolume(
 
 BEGIN_SHADER_PARAMETER_STRUCT(FVolumeData, )
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ProbeIrradiance)
+	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ProbeIrradianceB)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ProbeDistance)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D, ProbeOffsets)
 	SHADER_PARAMETER_RDG_TEXTURE(Texture2D<uint>, ProbeStates)
@@ -88,6 +89,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FVolumeData, )
 	SHADER_PARAMETER(float, BlendDistanceBlack)
 	SHADER_PARAMETER(float, ApplyLighting)
 	SHADER_PARAMETER(float, IrradianceScalar)
+	SHADER_PARAMETER(float, IrradianceTimeOfDayBlend)
 END_SHADER_PARAMETER_STRUCT()
 
 BEGIN_SHADER_PARAMETER_STRUCT(FApplyLightingDeferredShaderParameters, )
@@ -276,6 +278,25 @@ void FDDGIVolumeSceneProxy::ReallocateSurfaces_RenderThread(FRHICommandListImmed
 		GRenderTargetPool.FindFreeElement(RHICmdList, Desc, ProbesIrradiance, TEXT("DDGIIrradiance"));
 	}
 
+	// Baked time-of-day irradiance (same layout as ProbesIrradiance)
+	{
+		ProbesIrradianceBaked.Empty();
+		const int32 NumBaked = ComponentData.BakedTimeOfDaySampleCount;
+		if (NumBaked > 0)
+		{
+			FIntPoint BakedTexDims = GetIrradianceTextureDimensions(ComponentData.ProbeCounts);
+			EPixelFormat BakedFormat = (IrradianceBits == EDDGIIrradianceBits::n32) ? FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatIrradianceHighBitDepth : FDDGIVolumeSceneProxy::FComponentData::c_pixelFormatIrradianceLowBitDepth;
+			ProbesIrradianceBaked.Reserve(NumBaked);
+			for (int32 SliceIndex = 0; SliceIndex < NumBaked; ++SliceIndex)
+			{
+				TRefCountPtr<IPooledRenderTarget> Slice;
+				FPooledRenderTargetDesc BakedDesc(FPooledRenderTargetDesc::Create2DDesc(BakedTexDims, BakedFormat, FClearValueBinding::Transparent, TexCreate_None, TexCreate_ShaderResource | TexCreate_UAV, false));
+				GRenderTargetPool.FindFreeElement(RHICmdList, BakedDesc, Slice, *FString::Printf(TEXT("DDGIIrradianceBaked_%d"), SliceIndex));
+				ProbesIrradianceBaked.Add(Slice);
+			}
+		}
+	}
+
 	// Distance
 	{
 		FIntPoint ProxyTexDims = GetDistanceTextureDimensions(ComponentData.ProbeCounts);
@@ -328,6 +349,13 @@ void FDDGIVolumeSceneProxy::ResetTextures_RenderThread(FRDGBuilder& GraphBuilder
 {
 	float ClearColor[] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(ProbesIrradiance)), ClearColor);
+	for (TRefCountPtr<IPooledRenderTarget>& BakedSlice : ProbesIrradianceBaked)
+	{
+		if (BakedSlice.IsValid())
+		{
+			AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(BakedSlice)), ClearColor);
+		}
+	}
 	AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(GraphBuilder.RegisterExternalTexture(ProbesDistance)), ClearColor);
 
 	if (ProbesOffsets)
@@ -568,8 +596,36 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 				FProxyEntry volume = volumes[volumeIndex];
 				const FDDGIVolumeSceneProxy* volumeProxy = volume.proxy;
 
-				// Set the volume textures
-				PassParameters->DDGIVolume[volumeIndex].ProbeIrradiance = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesIrradiance);
+				// Set the volume textures (irradiance may be two baked slices + blend for time-of-day)
+				{
+					FRDGTextureRef IrradianceA;
+					FRDGTextureRef IrradianceB;
+					float IrradianceToDBlend = 0.f;
+					const int32 NumBakedIrradiance = volumeProxy->ProbesIrradianceBaked.Num();
+					if (volumeProxy->ComponentData.bUseBakedTimeOfDayIrradiance && NumBakedIrradiance >= 2)
+					{
+						const float u = FMath::Clamp(volumeProxy->ComponentData.BakedTimeOfDay, 0.f, 1.f);
+						const float f = u * float(NumBakedIrradiance - 1);
+						const int32 i0 = FMath::Clamp(FMath::FloorToInt(f), 0, NumBakedIrradiance - 1);
+						const int32 i1 = FMath::Clamp(i0 + 1, 0, NumBakedIrradiance - 1);
+						IrradianceToDBlend = f - float(i0);
+						IrradianceA = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesIrradianceBaked[i0]);
+						IrradianceB = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesIrradianceBaked[i1]);
+					}
+					else if (volumeProxy->ComponentData.bUseBakedTimeOfDayIrradiance && NumBakedIrradiance == 1)
+					{
+						IrradianceA = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesIrradianceBaked[0]);
+						IrradianceB = IrradianceA;
+					}
+					else
+					{
+						IrradianceA = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesIrradiance);
+						IrradianceB = IrradianceA;
+					}
+					PassParameters->DDGIVolume[volumeIndex].ProbeIrradiance = IrradianceA;
+					PassParameters->DDGIVolume[volumeIndex].ProbeIrradianceB = IrradianceB;
+					PassParameters->DDGIVolume[volumeIndex].IrradianceTimeOfDayBlend = IrradianceToDBlend;
+				}
 				PassParameters->DDGIVolume[volumeIndex].ProbeDistance = GraphBuilder.RegisterExternalTexture(volumeProxy->ProbesDistance);
 				PassParameters->DDGIVolume[volumeIndex].ProbeOffsets = RegisterExternalTextureWithFallback(GraphBuilder, volumeProxy->ProbesOffsets, GSystemTextures.BlackDummy);
 				PassParameters->DDGIVolume[volumeIndex].ProbeStates = RegisterExternalTextureWithFallback(GraphBuilder, volumeProxy->ProbesStates, GSystemTextures.BlackDummy);
@@ -635,9 +691,11 @@ void FDDGIVolumeSceneProxy::RenderDiffuseIndirectLight_RenderThread(
 			for (int32 volumeIndex = numVolumes; volumeIndex < FDDGIVolumeSceneProxy::FComponentData::c_RTXGI_DDGI_MAX_SHADING_VOLUMES; ++volumeIndex)
 			{
 				PassParameters->DDGIVolume[volumeIndex].ProbeIrradiance = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);
+				PassParameters->DDGIVolume[volumeIndex].ProbeIrradianceB = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);
 				PassParameters->DDGIVolume[volumeIndex].ProbeDistance = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);
 				PassParameters->DDGIVolume[volumeIndex].ProbeOffsets = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);
 				PassParameters->DDGIVolume[volumeIndex].ProbeStates = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);
+				PassParameters->DDGIVolume[volumeIndex].IrradianceTimeOfDayBlend = 0.f;
 			}
 
 			if (CVarLightingPassScale.GetValueOnRenderThread() == 1.0f)
@@ -1079,6 +1137,9 @@ void UDDGIVolumeComponent::UpdateRenderThreadData()
 		ComponentData.LightingMultiplier = LightMultiplier;
 		ComponentData.RuntimeStatic = RuntimeStatic;
 		ComponentData.SkyLightTypeOnRayMiss = SkyLightTypeOnRayMiss;
+		ComponentData.bUseBakedTimeOfDayIrradiance = bUseBakedTimeOfDayIrradiance;
+		ComponentData.BakedTimeOfDay = FMath::Clamp(BakedTimeOfDay, 0.f, 1.f);
+		ComponentData.BakedTimeOfDaySampleCount = BakedTimeOfDaySampleCount;
 
 		if (ScrollProbesInfinitely)
 		{
@@ -1348,6 +1409,13 @@ void UDDGIVolumeComponent::DestroyRenderState_Concurrent()
 						ComponentLoadContext.Distance = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesDistance->GetRHI());
 						ComponentLoadContext.Offsets = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesOffsets ? DDGIProxy->ProbesOffsets->GetRHI() : nullptr);
 						ComponentLoadContext.States = GetTexturePixelsStep1_RenderThread(RHICmdList, DDGIProxy->ProbesStates ? DDGIProxy->ProbesStates->GetRHI() : nullptr);
+						const int32 NumBakedPreserve = DDGIProxy->ProbesIrradianceBaked.Num();
+						ComponentLoadContext.BakedIrradianceVolumes.SetNum(NumBakedPreserve);
+						for (int32 BakedIdx = 0; BakedIdx < NumBakedPreserve; ++BakedIdx)
+						{
+							IPooledRenderTarget* BakedRT = DDGIProxy->ProbesIrradianceBaked[BakedIdx].GetReference();
+							ComponentLoadContext.BakedIrradianceVolumes[BakedIdx] = GetTexturePixelsStep1_RenderThread(RHICmdList, BakedRT ? BakedRT->GetRHI() : nullptr);
+						}
 					}
 				}
 
@@ -1545,6 +1613,44 @@ void UDDGIVolumeComponent::SetProbesVisualization(bool IsProbesVisualized)
 {
 #if WITH_RTXGI
 	VisualizeProbes = IsProbesVisualized;
+	MarkRenderDynamicDataDirty();
+#endif
+}
+
+void UDDGIVolumeComponent::CaptureIrradianceToBakedTimeOfDaySlot(int32 SlotIndex)
+{
+#if WITH_RTXGI
+	if (!SceneProxy || BakedTimeOfDaySampleCount <= 0)
+	{
+		return;
+	}
+	if (SlotIndex < 0 || SlotIndex >= BakedTimeOfDaySampleCount)
+	{
+		return;
+	}
+	FDDGIVolumeSceneProxy* Proxy = SceneProxy;
+	ENQUEUE_RENDER_COMMAND(DDGICaptureIrradianceToBakedToD)(
+		[Proxy, SlotIndex](FRHICommandListImmediate& RHICmdList)
+		{
+			if (!Proxy->ProbesIrradiance.IsValid() || !Proxy->ProbesIrradianceBaked.IsValidIndex(SlotIndex) || !Proxy->ProbesIrradianceBaked[SlotIndex].IsValid())
+			{
+				return;
+			}
+			FRHITexture* Src = Proxy->ProbesIrradiance->GetRHI();
+			FRHITexture* Dst = Proxy->ProbesIrradianceBaked[SlotIndex]->GetRHI();
+			if (Src && Dst)
+			{
+				RHICmdList.CopyTexture(Src, Dst, FRHICopyTextureInfo{});
+			}
+		});
+	FlushRenderingCommands();
+#endif
+}
+
+void UDDGIVolumeComponent::SetBakedTimeOfDay(float NewTimeOfDay)
+{
+#if WITH_RTXGI
+	BakedTimeOfDay = FMath::Clamp(NewTimeOfDay, 0.f, 1.f);
 	MarkRenderDynamicDataDirty();
 #endif
 }

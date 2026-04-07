@@ -131,6 +131,16 @@ static void LoadVolumeTextures_RenderThread(FRDGBuilder& GraphBuilder, FDDGIVolu
 		AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(IrradianceLoaded), GraphBuilder.RegisterExternalTexture(proxy->ProbesIrradiance), FRHICopyTextureInfo{});
 	}
 
+	for (int32 SliceIdx = 0; SliceIdx < proxy->ProbesIrradianceBaked.Num(); ++SliceIdx)
+	{
+		if (proxy->TextureLoadContext.BakedIrradianceVolumes.IsValidIndex(SliceIdx) && proxy->TextureLoadContext.BakedIrradianceVolumes[SliceIdx].Texture)
+		{
+			FRHITexture* SrcTexture = proxy->TextureLoadContext.BakedIrradianceVolumes[SliceIdx].Texture.GetReference();
+			TRefCountPtr<IPooledRenderTarget> LoadedSlice = CreateRenderTarget(SrcTexture, *FString::Printf(TEXT("DDGIIrradianceBaked%dLoaded"), SliceIdx));
+			AddCopyTexturePass(GraphBuilder, GraphBuilder.RegisterExternalTexture(LoadedSlice), GraphBuilder.RegisterExternalTexture(proxy->ProbesIrradianceBaked[SliceIdx]), FRHICopyTextureInfo{});
+		}
+	}
+
 	if (proxy->TextureLoadContext.Distance.Texture)
 	{
 		TRefCountPtr<IPooledRenderTarget> DistanceLoaded = CreateRenderTarget(proxy->TextureLoadContext.Distance.Texture.GetReference(), TEXT("DDGIDistanceLoaded"));

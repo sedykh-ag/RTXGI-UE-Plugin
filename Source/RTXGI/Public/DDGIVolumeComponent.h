@@ -79,6 +79,8 @@ struct FDDGITextureLoadContext
 	FDDGITexturePixels Distance;
 	FDDGITexturePixels Offsets;
 	FDDGITexturePixels States;
+	/** Staged baked irradiance: one entry per time-of-day slot (independent from Irradiance / ProbesIrradiance). */
+	TArray<FDDGITexturePixels> BakedIrradianceVolumes;
 
 	void Clear()
 	{
@@ -134,7 +136,9 @@ public:
 		static const bool c_RTXGI_DDGI_PROBE_CLASSIFICATION = true;
 
 		// It considers this many volumes that pass frustum culling when sampling GI for the scene.
-		static const int c_RTXGI_DDGI_MAX_SHADING_VOLUMES = 12;
+		// Capped at 11: ApplyLightingDeferred binds two irradiance textures per volume for baked time-of-day
+		// interpolation; with 12 volumes, 5 GBuffer-related SRVs, and lighting channels, SM6 exceeds the 64-SRV limit.
+		static const int c_RTXGI_DDGI_MAX_SHADING_VOLUMES = 11;
 
 		static const EPixelFormat c_pixelFormatRadianceLowBitDepth = EPixelFormat::PF_G32R32F;
 		static const EPixelFormat c_pixelFormatRadianceHighBitDepth = EPixelFormat::PF_A32B32G32R32F;
@@ -184,11 +188,19 @@ public:
 		bool RuntimeStatic = false; // If true, does not update during gameplay, only during editor.
 		EDDGISkyLightType SkyLightTypeOnRayMiss = EDDGISkyLightType::Raster;
 		bool bForceUpdate = false;
+		/** When true, indirect lighting samples baked irradiance slices (see BakedTimeOfDay*) instead of ProbesIrradiance alone. */
+		bool bUseBakedTimeOfDayIrradiance = false;
+		/** Normalized time key for blending baked slices; always in [0, 1] (0 = first slice, 1 = last). */
+		float BakedTimeOfDay = 0.5f;
+		/** Number of baked irradiance textures (0 = not using multi-slice bake). */
+		int32 BakedTimeOfDaySampleCount = 0;
 	};
 	FComponentData ComponentData;
 	FDDGITextureLoadContext TextureLoadContext;
 
 	TRefCountPtr<IPooledRenderTarget> ProbesIrradiance;
+	/** Baked irradiance per time-of-day keyframe; same format/resolution as ProbesIrradiance. */
+	TArray<TRefCountPtr<IPooledRenderTarget>> ProbesIrradianceBaked;
 	TRefCountPtr<IPooledRenderTarget> ProbesDistance;
 	TRefCountPtr<IPooledRenderTarget> ProbesOffsets;
 	TRefCountPtr<IPooledRenderTarget> ProbesStates;
@@ -344,6 +356,18 @@ public:
 	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = "GI Volume");
 	bool RuntimeStatic = false;
 
+	// When enabled with BakedTimeOfDaySampleCount >= 2, indirect lighting linearly interpolates two adjacent baked irradiance textures. Distance/offsets/states are still a single bake (geometry-static). Use Runtime Static and skip probe updates at runtime for best results.
+	UPROPERTY(EditAnywhere, Category = "GI Volume|Baked Time Of Day")
+	bool bUseBakedTimeOfDayIrradiance = false;
+
+	// Normalized blend coordinate over baked slices: 0 = slot 0, 1 = last slot; values are clamped to [0, 1].
+	UPROPERTY(EditAnywhere, Category = "GI Volume|Baked Time Of Day", meta = (ClampMin = "0", ClampMax = "1"))
+	float BakedTimeOfDay = 0.5f;
+
+	// How many irradiance keyframes are stored (0 = off). Set before capturing; slot k corresponds to time k / max(SampleCount - 1, 1).
+	UPROPERTY(EditAnywhere, Category = "GI Volume|Baked Time Of Day", meta = (ClampMin = "0"))
+	int32 BakedTimeOfDaySampleCount = 0;
+
 	UPROPERTY(meta=(DeprecatedProperty, DeprecationMessage = "not needed from blueprints"));
 	FVector LastOrigin_DEPRECATED;
 
@@ -493,6 +517,16 @@ public:
 
 	UFUNCTION(BlueprintCallable, meta = (AdvancedDisplay = "2", DevelopmentOnly), Category = "DDGI")
 	void SetProbesVisualization(bool IsProbesVisualized);
+
+	/** Copies the current ray-traced ProbesIrradiance into baked slot SlotIndex (0 .. BakedTimeOfDaySampleCount-1). Call after lighting has converged for that time of day. */
+	UFUNCTION(BlueprintCallable, Category = "DDGI|Baked Time Of Day")
+	void CaptureIrradianceToBakedTimeOfDaySlot(int32 SlotIndex);
+
+	UFUNCTION(BlueprintCallable, Category = "DDGI|Baked Time Of Day")
+	void SetBakedTimeOfDay(float NewTimeOfDay);
+
+	UFUNCTION(BlueprintCallable, Category = "DDGI|Baked Time Of Day")
+	float GetBakedTimeOfDay() const { return BakedTimeOfDay; }
 
 	FDDGIVolumeSceneProxy* SceneProxy;
 
