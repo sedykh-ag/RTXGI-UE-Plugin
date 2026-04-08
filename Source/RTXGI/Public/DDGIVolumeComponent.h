@@ -133,7 +133,7 @@ public:
 	struct FComponentData
 	{
 		// A shared location cpp side for operational defines
-		static const bool c_RTXGI_DDGI_PROBE_CLASSIFICATION = true;
+		static const bool c_RTXGI_DDGI_PROBE_CLASSIFICATION = false;
 
 		// It considers this many volumes that pass frustum culling when sampling GI for the scene.
 		// Capped at 11: ApplyLightingDeferred binds two irradiance textures per volume for baked time-of-day
